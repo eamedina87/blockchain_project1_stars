@@ -64,20 +64,24 @@ class Blockchain {
     _addBlock(block) {
         let self = this;
         return new Promise(async (resolve, reject) => {
-           let currentHeight = await self.getChainHeight();
-           var previousBlockHash = null;
-           if (currentHeight != -1) {
-            let previousBlock = await self.getBlockByHeight(currentHeight);
-            previousBlockHash = previousBlock.hash;
-           }
-           let newHeight = self.height + 1;
-           block.previousBlockHash = previousBlockHash;
-           block.time = self._getCurrentTime();
-           block.height = newHeight;
-           block.hash = SHA256(JSON.stringify(block)).toString();
-           self.chain.push(block);
-           self.height = newHeight;
-           resolve(block);
+            let isChainValid = (await self.validateChain()).length === 0;
+            if (!isChainValid) {
+                resolve(null);
+            }
+            let currentHeight = await self.getChainHeight();
+            var previousBlockHash = null;
+            if (currentHeight != -1) {
+                let previousBlock = await self.getBlockByHeight(currentHeight);
+                previousBlockHash = previousBlock.hash;
+            }
+            let newHeight = self.height + 1;
+            block.previousBlockHash = previousBlockHash;
+            block.time = self._getCurrentTime();
+            block.height = newHeight;
+            block.hash = SHA256(JSON.stringify(block)).toString();
+            self.chain.push(block);
+            self.height = newHeight;
+            resolve(block);
         });
     }
 
@@ -122,9 +126,9 @@ class Blockchain {
             let currentTime = self._getCurrentTime();
             let messageDate = new Date(messageTime);
             let currentDate = new Date(currentTime);
-            let fiveMinutes = 5 * 60 * 1000;
+            let fiveMinutes = 5 * 60;
             if (currentDate - messageDate >= fiveMinutes) {
-                reject(Error("Message is older than 5 minutes"));
+                reject("Message is older than 5 minutes");
             } else {
                 let verified = bitcoinMessage.verify(message, address, signature)
                 if (verified) {
@@ -133,9 +137,14 @@ class Blockchain {
                         "star": star
                     };
                     let block = new BlockClass.Block({data: starData});
-                    resolve(await this._addBlock(block));
+                    let addedBlock = await this._addBlock(block);
+                    if (addedBlock) {
+                        resolve(addedBlock);
+                    } else {
+                        reject("Chain is not valid");
+                    }
                 } else {
-                    reject(Error("Message couldn't be verified"));
+                    reject("Message couldn't be verified");
                 }
             }
         });
@@ -208,15 +217,16 @@ class Blockchain {
         let self = this;
         let errorLog = [];
         return new Promise(async (resolve, reject) => {
-            for (var blockHeight = self.height; i >= 0; i--) {
-                let currentBlock = self.getBlockByHeight(blockHeight);
-                if (!currentBlock.validate()) {
-                    errorLog.push("Block with height " + blockheight + "is not valid");
+            for (var blockHeight = self.height; blockHeight >= 0; blockHeight--) {
+                let currentBlock = await self.getBlockByHeight(blockHeight);
+                let blockValid = await currentBlock.validate();
+                if (!blockValid) {
+                    errorLog.push("Block with height " + blockHeight + "is not valid");
                 }
-                let previousBlock = self.getBlockByHeight(blockHeight - 1);
+                let previousBlock = await self.getBlockByHeight(blockHeight - 1);
                 if (previousBlock) {
                     if (currentBlock.previousBlockHash != previousBlock.hash) {
-                        errorLog.push("Block with height " + blockheight + "has previousBlockHash " + currentBlock.previousBlockHash + "but previous block hash is " + previousBlock.hash);
+                        errorLog.push("Block with height " + blockHeight + "has previousBlockHash " + currentBlock.previousBlockHash + "but previous block hash is " + previousBlock.hash);
                     }
                 }
             }
